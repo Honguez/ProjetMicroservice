@@ -12,6 +12,7 @@ function currentDate() {
     today = mm + '/' + dd + '/' + yyyy;
     return today.toString();
 }
+
 function crud_wr() {
 
     let wr_list = {};
@@ -33,7 +34,7 @@ function crud_wr() {
 
         // Vérification que tous les champs nécessaires sont présents
         if (!applicant || !work || !dc_date) {
-            callback(null, {success: false, msg: 'Les champs applicant, work et dc_date sont requis'});
+            return callback(null, {success: false, msg: 'Les champs applicant, work et dc_date sont requis'});
         }
 
         // Génération d'un ID unique pour la nouvelle demande de travail
@@ -49,6 +50,11 @@ function crud_wr() {
         };
 
         wr_list[id] = new_wr
+        //On notifie le microservice stats_wr qu'un wr a été créé
+        this.act('role:stats', {
+            cmd: 'create',
+            applicant: applicant
+        })
 
         // Renvoie de l'ID de la nouvelle demande de travail dans le callback
         callback(null, {success: true, data: [new_wr]});
@@ -88,7 +94,7 @@ function crud_wr() {
         }
 
         //ensuite on vérifie si le wr existe dans la liste
-        let wr = wr_list[wr_id];
+        const wr = wr_list[wr_id];
         // si il n'existe pas, on renvoie une erreur
         if (!wr) {
             return callback(null, {
@@ -108,12 +114,15 @@ function crud_wr() {
         if (work) {
             wr.work = work;
         }
-
         if (state) {
             wr.state = state;
             wr.compl_date = currentDate()
+            //On notifie le microservice stats_wr qu'un wr a été fermé
+            this.act('role:stats', {
+                cmd: 'update',
+                applicant: wr_list[wr_id].applicant
+            })
         }
-
         wr_list[wr_id] = wr;
 
         return callback(null, {
@@ -134,7 +143,7 @@ function crud_wr() {
             });
         }
         //ensuite on vérifie si le wr existe dans la liste
-        let wr_to_delete = wr_list[wr_id];
+        const wr_to_delete = wr_list[wr_id];
         // si il n'existe pas, on renvoie une erreur
         if (!wr_to_delete) {
             return callback(null, {
@@ -153,18 +162,29 @@ function crud_wr() {
 
         delete wr_list[wr_id];
 
+        //On notifie le microservice stats_wr qu'un wr a été supprimé
+        this.act('role:stats', {
+            cmd: 'delete',
+            applicant: wr_to_delete.applicant
+        })
+
         return callback(null, {
             success: true,
             data: [wr_to_delete]
         });
     }
 
-    function deleteAll_wr (msg, callback){
+    function deleteAll_wr(msg, callback) {
         // Si aucun ID n'est spécifié, on appelle deleteALl_wr pour supprimer toutes les demandes de travail non fermées
         for (const id in wr_list) {
-            const wr = wr_list[id];
-            if (wr.state !== 'closed') {
+            const wr_to_delete = wr_list[id];
+            if (wr_to_delete.state !== 'closed') {
                 delete wr_list[id];
+                //On notifie le microservice stats_wr qu'un wr a été créé
+                this.act('role:stats', {
+                    cmd: 'delete',
+                    applicant: wr_to_delete.applicant
+                })
             }
         }
         return callback(null, {
@@ -179,4 +199,11 @@ seneca.use(crud_wr)
 
 //definition du port d'écoute
 
-seneca.listen({port: 9000})
+seneca.listen({
+    port: 9000
+})
+
+seneca.client({
+    pin: 'role:stats',// ce module enverra les message avec le role stats
+    port: 6000,      // sur le port 9000 (qui est le port sur lequel le microservice stats écoute)
+})
